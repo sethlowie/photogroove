@@ -1,10 +1,10 @@
 module PhotoGroove exposing (main)
 
-import Array exposing (Array)
 import Browser
 import Html exposing (Html, button, div, h1, h3, img, input, label, text)
 import Html.Attributes exposing (checked, class, classList, id, name, src, type_)
 import Html.Events exposing (onClick)
+import Http
 import Random
 
 
@@ -22,6 +22,7 @@ type Msg
     | ClickedSize ThumbnailSize
     | ClickedSupriseMe
     | GotRandomPhoto Photo
+    | GotPhotos (Result Http.Error String)
 
 
 
@@ -117,20 +118,12 @@ type Status
 -- MODEL
 
 
-myPhotos : List Photo
-myPhotos =
-    [ { url = "1.jpeg" }
-    , { url = "2.jpeg" }
-    , { url = "3.jpeg" }
-    ]
-
-
 initialModel : () -> ( Model, Cmd Msg )
 initialModel () =
     ( { status = Loading
       , chosenSize = Medium
       }
-    , Cmd.none
+    , initialCmd
     )
 
 
@@ -156,10 +149,12 @@ update msg model =
         ClickedSupriseMe ->
             case model.status of
                 Loaded (firstPhoto :: otherPhotos) _ ->
-                    ( model
-                    , Random.generate GotRandomPhoto
-                        (Random.uniform firstPhoto otherPhotos)
-                    )
+                    Random.uniform firstPhoto otherPhotos
+                        |> Random.generate GotRandomPhoto
+                        |> Tuple.pair model
+
+                Loaded [] _ ->
+                    ( model, Cmd.none )
 
                 Loading ->
                     ( model, Cmd.none )
@@ -169,6 +164,21 @@ update msg model =
 
         GotRandomPhoto photo ->
             ( { model | status = selectUrl photo.url model.status }, Cmd.none )
+
+        GotPhotos (Ok responseStr) ->
+            case String.split "," responseStr of
+                (firstUrl :: _) as urls ->
+                    let
+                        photos =
+                            List.map Photo urls
+                    in
+                    ( { model | status = Loaded photos firstUrl }, Cmd.none )
+
+                [] ->
+                    ( { model | status = Errored "0 photos found" }, Cmd.none )
+
+        GotPhotos (Err _) ->
+            ( { model | status = Errored "Server Error!" }, Cmd.none )
 
 
 selectUrl : String -> Status -> Status
@@ -182,6 +192,14 @@ selectUrl url status =
 
         Errored _ ->
             status
+
+
+initialCmd : Cmd Msg
+initialCmd =
+    Http.get
+        { url = "http://elm-in-action.com/photos/list"
+        , expect = Http.expectString GotPhotos
+        }
 
 
 main : Program () Model Msg
